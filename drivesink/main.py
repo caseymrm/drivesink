@@ -66,7 +66,7 @@ class NeedAuthException(Exception):
 
 class MainHandler(SinkHandler):
     def get(self):
-        self.response.write('Ready to <a href="/auth">auth</a>?')
+        self.response.write('Want to <a href="/auth">auth</a>?')
 
 
 class AuthHandler(SinkHandler):
@@ -95,13 +95,28 @@ class AuthHandler(SinkHandler):
         self._set_cookie("token", response, 365)
         self.response.write(json.loads(response))
 
+
 class NodesHandler(SinkHandler):
     def get(self):
         nodes = self._fetch("%s/nodes?filters=kind:FILE" % self._metadata())
         self.response.write(nodes)
 
+
+class ConfigHandler(SinkHandler):
+    def get(self):
+        endpoints = self._endpoints()
+        token = self._all_tokens()
+        self.response.write("""
+        <pre>
+        %s
+        %s
+        </pre>
+        """ % (token, endpoints))
+
+
 app = webapp2.WSGIApplication([
     ('/', MainHandler),
+    ('/config', ConfigHandler),
     ('/auth', AuthHandler),
     ('/nodes', NodesHandler),
 ], debug=True)
