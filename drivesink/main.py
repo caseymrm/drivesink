@@ -39,10 +39,11 @@ class SinkHandler(webapp2.RequestHandler):
 
     def _endpoints(self):
         endpoints = self.request.cookies.get("endpoints")
-        if not endpoints:
+        if not endpoints or True:
+            # TODO: record fetched time
             endpoints = self._fetch(
                 "https://drive.amazonaws.com/drive/v1/account/endpoint")
-            self._set_cookie("endpoints", endpoints)
+            self._set_cookie("endpoints", endpoints, 5)
         return json.loads(endpoints)
 
     def _metadata(self):
@@ -104,14 +105,10 @@ class NodesHandler(SinkHandler):
 
 class ConfigHandler(SinkHandler):
     def get(self):
-        endpoints = self._endpoints()
         token = self._all_tokens()
-        self.response.write("""
-        <pre>
-        %s
-        %s
-        </pre>
-        """ % (token, endpoints))
+        token.update(self._endpoints())
+        self.response.write(
+            "<pre>\n%s\n</pre>" % json.dumps(token, sort_keys=True, indent=4))
 
 
 app = webapp2.WSGIApplication([
