@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import urllib
 import urllib2
 
 
@@ -11,6 +12,7 @@ class DriveSink(object):
     def __init__(self, args):
         self.args = args
         self.config = None
+        self.drivesink = args.drivesink
 
     def get_local_files(self, path):
         # TODO: symlinks, handle trailing slash
@@ -34,27 +36,47 @@ class DriveSink(object):
         for node in folder_nodes["data"]:
             logging.error(node)
 
+    def _config_file(self):
+        config_filename = self.args.config or os.environ.get(
+            "DRIVESINK", None)
+        if not config_filename:
+            from os.path import expanduser
+            config_filename = os.path.join(expanduser("~"), ".drivesink")
+        return config_filename
+
     def _config(self):
         if not self.config:
-            config_filename = self.args.config or os.environ.get(
-                "DRIVESINK", None)
-            if not config_filename:
-                from os.path import expanduser
-                config_filename = os.path.join(expanduser("~"), ".drivesink")
+            config_filename = self._config_file()
             try:
                 self.config = json.loads(open(config_filename, "r").read())
             except:
-                print "https://cloudsink.appspot.com/config to get your tokens"
+                print "%s/config to get your tokens" % self.drivesink
                 exit(1)
         return self.config
 
     def _fetch(self, url, data=None):
         # TODO: refresh token
-        headers = {
-            "Authorization": "Bearer %s" % self._config()["access_token"],
-        }
-        req = urllib2.Request(url, data, headers)
-        return urllib2.urlopen(req).read()
+        try:
+            headers = {
+                "Authorization": "Bearer %s" % self._config()["access_token"],
+            }
+            req = urllib2.Request(url, data, headers)
+            return urllib2.urlopen(req).read()
+        except urllib2.HTTPError, e:
+            if e.code == 401:
+                # Have to proxy to get the client id and secret
+                data = urllib.urlencode({
+                    "refresh_token": self._config()["refresh_token"],
+                })
+                req = urllib2.Request("%s/refresh" % self.drivesink, data)
+                new_config = json.loads(urllib2.urlopen(req).read())
+                self.config.update(new_config)
+                with open(self._config_file(), 'w') as f:
+                    f.write(json.dumps(self.config, sort_keys=True, indent=4))
+                return self._fetch(url, data)
+            else:
+                print e.read()
+                raise
 
 def main():
     parser = argparse.ArgumentParser(
@@ -63,6 +85,9 @@ def main():
     parser.add_argument('source', help='The source directory')
     parser.add_argument('destination', help='The destination directory')
     parser.add_argument('-c', '--config', help='The config file')
+    parser.add_argument('-d', '--drivesink', help='Drivesink URL',
+                        # TODO: https://cloudsink.appspot.com
+                        default='http://localhost:14080')
 
     args = parser.parse_args()
 

@@ -97,6 +97,21 @@ class AuthHandler(SinkHandler):
         self.response.write(json.loads(response))
 
 
+class RefreshHandler(SinkHandler):
+    def post(self):
+        refresh_token = self.request.get("refresh_token")
+        data = urllib.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": credentials.CLIENT_ID,
+            "client_secret": credentials.SECRET,
+        })
+        req = urllib2.Request("https://api.amazon.com/auth/o2/token", data)
+        response = urllib2.urlopen(req).read()
+        self._set_cookie("token", response, 365)
+        self.response.write(response)
+
+
 class NodesHandler(SinkHandler):
     def get(self):
         nodes = self._fetch("%s/nodes?filters=kind:FILE" % self._metadata())
@@ -115,5 +130,6 @@ app = webapp2.WSGIApplication([
     ('/', MainHandler),
     ('/config', ConfigHandler),
     ('/auth', AuthHandler),
+    ('/refresh', RefreshHandler),
     ('/nodes', NodesHandler),
 ], debug=True)
