@@ -33,8 +33,28 @@ class DriveSink(object):
         folder_nodes = json.loads(self._fetch(
             "%s/nodes?filters=kind:FOLDER" % self._config()["metadataUrl"]))
         # TODO: fetch just the ones that start with the path
+        root = None
+        children = {}
         for node in folder_nodes["data"]:
-            logging.error(node)
+            if node.get("isRoot", False):
+                root = node
+            for parent in node["parents"]:
+                children.setdefault(parent, []).append(node)
+        parts = filter(None, path.split("/"))
+        node = root
+        while len(parts):
+            for child in children.get(node["id"], []):
+                if child["name"].lower() == parts[0].lower():
+                    node = child
+                    parts.pop(0)
+                    continue
+            else:
+                break
+        # create a folder for each item left in parts, starting at node
+        logging.error(parts)
+        logging.error(node)
+
+
 
     def _config_file(self):
         config_filename = self.args.config or os.environ.get(
