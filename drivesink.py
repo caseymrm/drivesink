@@ -6,6 +6,7 @@ import logging
 import os
 import urllib
 import urllib2
+import uuid
 
 
 class DriveSink(object):
@@ -16,22 +17,34 @@ class DriveSink(object):
 
     def get_local_files(self, path):
         # TODO: symlinks, handle trailing slash
-        local_files = {}
+        local_files = {
+            "kind": "FOLDER",
+            "children": {},
+        }
         for dirpath, dirnames, filenames in os.walk(path):
             relative = dirpath[len(path):]
+            current_dir = local_files
+            for dirname in relative.split("/"):
+                if dirname:
+                    current_dir = current_dir["children"][dirname]
+            for dirname in dirnames:
+                current_dir["children"][dirname] = {
+                    "kind": "FOLDER",
+                    "children": {},
+                }
             for filename in filenames:
                 local_path = os.path.join(dirpath, filename)
-                local_files["%s/%s" % (relative, filename)] = {
+                current_dir["children"][filename] = {
+                    "kind": "FILE",
                     "path": local_path,
                     "size": os.path.getsize(local_path),
                 }
         return local_files
 
-    def get_remote_files(self, path):
-        remote_files = {}
+    def get_remote_files(self, path, create_missing=False):
         # TODO: handle trailing slash, endpoint refresh
-        folder_nodes = json.loads(self._fetch(
-            "%s/nodes?filters=kind:FOLDER" % self._config()["metadataUrl"]))
+        folder_nodes = self._fetch(
+            "%s/nodes?filters=kind:FOLDER" % self._config()["metadataUrl"])
         # TODO: fetch just the ones that start with the path
         root = None
         children = {}
@@ -47,14 +60,38 @@ class DriveSink(object):
                 if child["name"].lower() == parts[0].lower():
                     node = child
                     parts.pop(0)
-                    continue
+                    break
             else:
                 break
         # create a folder for each item left in parts, starting at node
-        logging.error(parts)
-        logging.error(node)
+        if create_missing:
+            for part in parts:
+                node = self._fetch("%s/nodes" % self._config()["metadataUrl"],
+                                   {
+                                       "kind": "FOLDER",
+                                       "name": part,
+                                       "parents": [node["id"]],
+                                   })
+        elif parts:
+            return None
+        remote_files = {
+            "node": node,
+            "children": {}
+        }
+        child_nodes = self._fetch("%s/nodes/%s/children" % (
+            self._config()["metadataUrl"], node["id"]))
+        for child in child_nodes["data"]:
+            logging.info(child)
+        return remote_files
 
-
+    def upload_node(self, local_node, remote_node):
+        if local_node["kind"] == "FILE":
+            # TODO: handle single file case
+            pass
+        elif local_node["kind"] == "FOLDER":
+            for local_file, local_info in local_node["children"].iteritems():
+                if local_file not in remote_node["children"]:
+                    logging.info("upload %r %r", local_file, local_info)
 
     def _config_file(self):
         config_filename = self.args.config or os.environ.get(
@@ -74,16 +111,19 @@ class DriveSink(object):
                 exit(1)
         return self.config
 
-    def _fetch(self, url, data=None):
-        # TODO: refresh token
+    def _fetch(self, url, data=None, refresh=True):
         try:
             headers = {
                 "Authorization": "Bearer %s" % self._config()["access_token"],
             }
-            req = urllib2.Request(url, data, headers)
-            return urllib2.urlopen(req).read()
+            if data:
+                req_data = json.dumps(data)
+            else:
+                req_data = None
+            req = urllib2.Request(url, req_data, headers)
+            return json.loads(urllib2.urlopen(req).read())
         except urllib2.HTTPError, e:
-            if e.code == 401:
+            if e.code == 401 and refresh:
                 # Have to proxy to get the client id and secret
                 data = urllib.urlencode({
                     "refresh_token": self._config()["refresh_token"],
@@ -93,9 +133,9 @@ class DriveSink(object):
                 self.config.update(new_config)
                 with open(self._config_file(), 'w') as f:
                     f.write(json.dumps(self.config, sort_keys=True, indent=4))
-                return self._fetch(url, data)
+                return self._fetch(url, data, refresh=False)
             else:
-                print e.read()
+                logging.error(e.read())
                 raise
 
 def main():
@@ -117,10 +157,15 @@ def main():
 
     drivesink = DriveSink(args)
     local_files = drivesink.get_local_files(args.source)
-    remote_files = drivesink.get_remote_files(args.destination)
-    logging.error(local_files)
-    logging.error(remote_files)
+    remote_files = drivesink.get_remote_files(args.destination, True)
+    logging.info(local_files)
+    logging.info(remote_files)
+    drivesink.upload_node(local_files, remote_files)
 
+logging.basicConfig(
+    format = "%(levelname) -10s %(module)s:%(lineno)s %(funcName)s %(message)s",
+    level = logging.DEBUG
+)
 
 if __name__ == "__main__":
     main()

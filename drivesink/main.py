@@ -34,6 +34,8 @@ class SinkHandler(webapp2.RequestHandler):
 
     def _fetch(self, url, data=None):
         headers = {"Authorization": "Bearer %s" % self._token()}
+        if data:
+            data = json.dumps(data)
         req = urllib2.Request(url, data, headers)
         return urllib2.urlopen(req).read()
 
