@@ -66,12 +66,7 @@ class DriveSink(object):
         # create a folder for each item left in parts, starting at node
         if create_missing:
             for part in parts:
-                node = self._fetch("%s/nodes" % self._config()["metadataUrl"],
-                                   {
-                                       "kind": "FOLDER",
-                                       "name": part,
-                                       "parents": [node["id"]],
-                                   })
+                node = self._make_folder(part, node)
         elif parts:
             return None
         remote_files = {
@@ -82,16 +77,45 @@ class DriveSink(object):
             self._config()["metadataUrl"], node["id"]))
         for child in child_nodes["data"]:
             logging.info(child)
+            remote_files["children"][child["name"]] = {
+                "node": child, "children": {}}
         return remote_files
 
     def upload_node(self, local_node, remote_node):
+        next_nodes = []
         if local_node["kind"] == "FILE":
             # TODO: handle single file case
             pass
-        elif local_node["kind"] == "FOLDER":
+        elif (local_node["kind"] == "FOLDER" and
+              remote_node["node"]["kind"] == "FOLDER"):
             for local_file, local_info in local_node["children"].iteritems():
-                if local_file not in remote_node["children"]:
-                    logging.info("upload %r %r", local_file, local_info)
+                if local_info["kind"] == "FOLDER":
+                    node = remote_node["children"].get(local_file)
+                    if not node:
+                        node = {
+                            "node": self._make_folder(
+                                local_file, remote_node["node"]),
+                            "children": {}
+                        }
+                    next_nodes.append((local_info, node))
+                elif local_info["kind"] == "FILE":
+                    if local_file not in remote_node["children"]:
+                        self._upload_file(
+                            local_file, local_info["path"],
+                            remote_node["node"]["id"])
+        for local, remote in next_nodes:
+            self.upload_node(local, remote)
+
+    def _upload_file(self, name, path, parent_id):
+        pass
+
+    def _make_folder(self, name, parent_node):
+        logging.info(
+            "Creating remote folder %s in %s", name, parent_node["name"])
+        return self._fetch("%s/nodes" % self._config()["metadataUrl"], {
+            "kind": "FOLDER",
+            "name": name,
+            "parents": [parent_node["id"]]})
 
     def _config_file(self):
         config_filename = self.args.config or os.environ.get(
