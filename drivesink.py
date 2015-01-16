@@ -9,113 +9,87 @@ import urllib2
 import uuid
 
 
+class CloudNode(object):
+    def __init__(self, node):
+        self.node = node
+        self._children_fetched = False
+
+    def children(self):
+        if not self._children_fetched:
+            nodes = DriveSink.instance().fetch_metadata(
+                "%%snodes/%s/children" % self.node["id"])
+            self._children = {n["name"]: CloudNode(n) for n in nodes["data"]}
+            self._children_fetched = True
+        return self._children
+
+    def child(self, name, create=False):
+        node = self.children().get(name)
+        if not node:
+            node = self._make_child_folder(name)
+        return node
+
+    def upload_child_file(self, local_path):
+        logging.info("Uploading %s in %r", local_path, self.node["name"])
+
+    def _make_child_folder(self, name):
+        logging.info(
+            "Creating remote folder %s in %s", name, self.node["name"])
+        node = CloudNode(
+            DriveSink.instance().fetch_metadata("%snodes", {
+                "kind": "FOLDER",
+                "name": name,
+                "parents": [self.node["id"]]}))
+        self._children[name] = node
+        return node
+
+
 class DriveSink(object):
     def __init__(self, args):
+        if not args:
+            logging.error("Never initialized")
+            exit(1)
         self.args = args
         self.config = None
         self.drivesink = args.drivesink
 
-    def get_local_files(self, path):
-        # TODO: symlinks, handle trailing slash
-        local_files = {
-            "kind": "FOLDER",
-            "children": {},
-        }
-        for dirpath, dirnames, filenames in os.walk(path):
-            relative = dirpath[len(path):]
-            current_dir = local_files
-            for dirname in relative.split("/"):
-                if dirname:
-                    current_dir = current_dir["children"][dirname]
-            for dirname in dirnames:
-                current_dir["children"][dirname] = {
-                    "kind": "FOLDER",
-                    "children": {},
-                }
-            for filename in filenames:
-                local_path = os.path.join(dirpath, filename)
-                current_dir["children"][filename] = {
-                    "kind": "FILE",
-                    "path": local_path,
-                    "size": os.path.getsize(local_path),
-                }
-        return local_files
+    @classmethod
+    def instance(cls, args=None):
+        if not hasattr(cls, "_instance"):
+            cls._instance = cls(args)
+        return cls._instance
 
-    def get_remote_files(self, path, create_missing=False):
-        # TODO: handle trailing slash, endpoint refresh
-        folder_nodes = self._fetch(
-            "%s/nodes?filters=kind:FOLDER" % self._config()["metadataUrl"])
-        # TODO: fetch just the ones that start with the path
-        root = None
-        children = {}
-        for node in folder_nodes["data"]:
-            if node.get("isRoot", False):
-                root = node
-            for parent in node["parents"]:
-                children.setdefault(parent, []).append(node)
+    def sync(self, source, destination):
+        remote_node = self.node_at_path(
+            self.get_root(), destination, create_missing=True)
+        for dirpath, dirnames, filenames in os.walk(source):
+            relative = dirpath[len(source):]
+            current_dir = self.node_at_path(
+                remote_node, relative, create_missing=True)
+            if not current_dir:
+                logging.error("Could not create missing node")
+                exit(1)
+            for dirname in dirnames:
+                current_dir.child(dirname, create=True)
+            for filename in filenames:
+                if filename not in current_dir.children():
+                    current_dir.upload_child_file(
+                        os.path.join(dirpath, filename))
+
+    def get_root(self):
+        nodes = self.fetch_metadata("%snodes?filters=isRoot:True")
+        if nodes["count"] != 1:
+            logging.error("Could not find root")
+            exit(1)
+        return CloudNode(nodes["data"][0])
+
+    def node_at_path(self, root, path, create_missing=False):
         parts = filter(None, path.split("/"))
         node = root
         while len(parts):
-            for child in children.get(node["id"], []):
-                if child["name"].lower() == parts[0].lower():
-                    node = child
-                    parts.pop(0)
-                    break
-            else:
-                break
-        # create a folder for each item left in parts, starting at node
-        if create_missing:
-            for part in parts:
-                node = self._make_folder(part, node)
-        elif parts:
-            return None
-        remote_files = {
-            "node": node,
-            "children": {}
-        }
-        child_nodes = self._fetch("%s/nodes/%s/children" % (
-            self._config()["metadataUrl"], node["id"]))
-        for child in child_nodes["data"]:
-            logging.info(child)
-            remote_files["children"][child["name"]] = {
-                "node": child, "children": {}}
-        return remote_files
-
-    def upload_node(self, local_node, remote_node):
-        next_nodes = []
-        if local_node["kind"] == "FILE":
-            # TODO: handle single file case
-            pass
-        elif (local_node["kind"] == "FOLDER" and
-              remote_node["node"]["kind"] == "FOLDER"):
-            for local_file, local_info in local_node["children"].iteritems():
-                if local_info["kind"] == "FOLDER":
-                    node = remote_node["children"].get(local_file)
-                    if not node:
-                        node = {
-                            "node": self._make_folder(
-                                local_file, remote_node["node"]),
-                            "children": {}
-                        }
-                    next_nodes.append((local_info, node))
-                elif local_info["kind"] == "FILE":
-                    if local_file not in remote_node["children"]:
-                        self._upload_file(
-                            local_file, local_info["path"],
-                            remote_node["node"]["id"])
-        for local, remote in next_nodes:
-            self.upload_node(local, remote)
-
-    def _upload_file(self, name, path, parent_id):
-        pass
-
-    def _make_folder(self, name, parent_node):
-        logging.info(
-            "Creating remote folder %s in %s", name, parent_node["name"])
-        return self._fetch("%s/nodes" % self._config()["metadataUrl"], {
-            "kind": "FOLDER",
-            "name": name,
-            "parents": [parent_node["id"]]})
+            node = node.child(parts.pop(0), create=create_missing)
+            if not node:
+                return None
+        return node
 
     def _config_file(self):
         config_filename = self.args.config or os.environ.get(
@@ -135,6 +109,9 @@ class DriveSink(object):
                 exit(1)
         return self.config
 
+    def fetch_metadata(self, path, data=None):
+        return self._fetch(path % self._config()["metadataUrl"], data)
+
     def _fetch(self, url, data=None, refresh=True):
         try:
             headers = {
@@ -149,10 +126,10 @@ class DriveSink(object):
         except urllib2.HTTPError, e:
             if e.code == 401 and refresh:
                 # Have to proxy to get the client id and secret
-                data = urllib.urlencode({
+                refresh = urllib.urlencode({
                     "refresh_token": self._config()["refresh_token"],
                 })
-                req = urllib2.Request("%s/refresh" % self.drivesink, data)
+                req = urllib2.Request("%s/refresh" % self.drivesink, refresh)
                 new_config = json.loads(urllib2.urlopen(req).read())
                 self.config.update(new_config)
                 with open(self._config_file(), 'w') as f:
@@ -179,12 +156,9 @@ def main():
         parser.print_help()
         exit(1)
 
-    drivesink = DriveSink(args)
-    local_files = drivesink.get_local_files(args.source)
-    remote_files = drivesink.get_remote_files(args.destination, True)
-    logging.info(local_files)
-    logging.info(remote_files)
-    drivesink.upload_node(local_files, remote_files)
+    drivesink = DriveSink.instance(args)
+
+    drivesink.sync(args.source, args.destination)
 
 logging.basicConfig(
     format = "%(levelname) -10s %(module)s:%(lineno)s %(funcName)s %(message)s",
