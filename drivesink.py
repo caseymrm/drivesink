@@ -4,8 +4,8 @@ import argparse
 import json
 import logging
 import os
-import urllib
-import urllib2
+import requests
+import requests_toolbelt
 import uuid
 
 
@@ -16,7 +16,7 @@ class CloudNode(object):
 
     def children(self):
         if not self._children_fetched:
-            nodes = DriveSink.instance().fetch_metadata(
+            nodes = DriveSink.instance().request_metadata(
                 "%%snodes/%s/children" % self.node["id"])
             self._children = {n["name"]: CloudNode(n) for n in nodes["data"]}
             self._children_fetched = True
@@ -28,14 +28,24 @@ class CloudNode(object):
             node = self._make_child_folder(name)
         return node
 
-    def upload_child_file(self, local_path):
+    def upload_child_file(self, name, local_path):
         logging.info("Uploading %s in %r", local_path, self.node["name"])
+        m = requests_toolbelt.MultipartEncoder([
+            ("metadata", json.dumps({
+                "name": name,
+                "kind": "FILE",
+                "parents": [self.node["id"]]})),
+            ("content", (name, open(local_path, 'rb')))])
+        node = CloudNode(DriveSink.instance().request_content(
+            "%snodes", method="post", data=m,
+            headers={'Content-Type': m.content_type}))
+        self._children[name] = node
 
     def _make_child_folder(self, name):
         logging.info(
             "Creating remote folder %s in %s", name, self.node["name"])
         node = CloudNode(
-            DriveSink.instance().fetch_metadata("%snodes", {
+            DriveSink.instance().request_metadata("%snodes", {
                 "kind": "FOLDER",
                 "name": name,
                 "parents": [self.node["id"]]}))
@@ -50,7 +60,6 @@ class DriveSink(object):
             exit(1)
         self.args = args
         self.config = None
-        self.drivesink = args.drivesink
 
     @classmethod
     def instance(cls, args=None):
@@ -73,10 +82,10 @@ class DriveSink(object):
             for filename in filenames:
                 if filename not in current_dir.children():
                     current_dir.upload_child_file(
-                        os.path.join(dirpath, filename))
+                        filename, os.path.join(dirpath, filename))
 
     def get_root(self):
-        nodes = self.fetch_metadata("%snodes?filters=isRoot:True")
+        nodes = self.request_metadata("%snodes?filters=isRoot:True")
         if nodes["count"] != 1:
             logging.error("Could not find root")
             exit(1)
@@ -105,39 +114,47 @@ class DriveSink(object):
             try:
                 self.config = json.loads(open(config_filename, "r").read())
             except:
-                print "%s/config to get your tokens" % self.drivesink
+                print "%s/config to get your tokens" % self.args.drivesink
                 exit(1)
         return self.config
 
-    def fetch_metadata(self, path, data=None):
-        return self._fetch(path % self._config()["metadataUrl"], data)
+    def request_metadata(self, path, json_data=None, **kwargs):
+        args = {}
+        if json_data:
+            args["method"] = "post"
+            args["data"] = json.dumps(json_data)
+        else:
+            args["method"] = "get"
 
-    def _fetch(self, url, data=None, refresh=True):
-        try:
-            headers = {
-                "Authorization": "Bearer %s" % self._config()["access_token"],
-            }
-            if data:
-                req_data = json.dumps(data)
-            else:
-                req_data = None
-            req = urllib2.Request(url, req_data, headers)
-            return json.loads(urllib2.urlopen(req).read())
-        except urllib2.HTTPError, e:
-            if e.code == 401 and refresh:
-                # Have to proxy to get the client id and secret
-                refresh = urllib.urlencode({
-                    "refresh_token": self._config()["refresh_token"],
-                })
-                req = urllib2.Request("%s/refresh" % self.drivesink, refresh)
-                new_config = json.loads(urllib2.urlopen(req).read())
-                self.config.update(new_config)
-                with open(self._config_file(), 'w') as f:
-                    f.write(json.dumps(self.config, sort_keys=True, indent=4))
-                return self._fetch(url, data, refresh=False)
-            else:
-                logging.error(e.read())
-                raise
+        args.update(kwargs)
+
+        return self._request(
+            path % self._config()["metadataUrl"], **args)
+
+    def request_content(self, path, **kwargs):
+        return self._request(
+            path % self._config()["contentUrl"], **kwargs)
+
+    def _request(self, url, refresh=True, **kwargs):
+        headers = {
+            "Authorization": "Bearer %s" % self._config()["access_token"],
+        }
+        headers.update(kwargs.pop("headers", {}))
+        req = requests.request(url=url, headers=headers, **kwargs)
+        if req.status_code == 401 and refresh:
+            # Have to proxy to get the client id and secret
+            req = requests.post("%s/refresh" % self.args.drivesink, data={
+                "refresh_token": self._config()["refresh_token"],
+            })
+            req.raise_for_status()
+            new_config = req.json()
+            self.config.update(new_config)
+            with open(self._config_file(), 'w') as f:
+                f.write(json.dumps(self.config, sort_keys=True, indent=4))
+            return self._request(url, refresh=False, **kwargs)
+        req.raise_for_status()
+        return req.json()
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -164,6 +181,7 @@ logging.basicConfig(
     format = "%(levelname) -10s %(module)s:%(lineno)s %(funcName)s %(message)s",
     level = logging.DEBUG
 )
+logging.getLogger("requests").setLevel(logging.WARNING)
 
 if __name__ == "__main__":
     main()
