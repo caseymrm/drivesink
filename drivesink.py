@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -24,11 +25,11 @@ class CloudNode(object):
 
     def child(self, name, create=False):
         node = self.children().get(name)
-        if not node:
+        if not node and create:
             node = self._make_child_folder(name)
         return node
 
-    def upload_child_file(self, name, local_path):
+    def upload_child_file(self, name, local_path, existing_node=None):
         logging.info("Uploading %s in %r", local_path, self.node["name"])
         m = requests_toolbelt.MultipartEncoder([
             ("metadata", json.dumps({
@@ -36,9 +37,15 @@ class CloudNode(object):
                 "kind": "FILE",
                 "parents": [self.node["id"]]})),
             ("content", (name, open(local_path, 'rb')))])
-        node = CloudNode(DriveSink.instance().request_content(
-            "%snodes", method="post", data=m,
-            headers={'Content-Type': m.content_type}))
+        if existing_node:
+            # TODO: this is under-documented and currently 500s on Amazon's side
+            node = CloudNode(DriveSink.instance().request_content(
+                "%%snodes/%s/content" % existing_node.node["id"],
+                method="put", data=m, headers={'Content-Type': m.content_type}))
+        else:
+            node = CloudNode(DriveSink.instance().request_content(
+                "%snodes", method="post", data=m,
+                headers={'Content-Type': m.content_type}))
         self._children[name] = node
 
     def _make_child_folder(self, name):
@@ -80,9 +87,21 @@ class DriveSink(object):
             for dirname in dirnames:
                 current_dir.child(dirname, create=True)
             for filename in filenames:
-                if filename not in current_dir.children():
-                    current_dir.upload_child_file(
-                        filename, os.path.join(dirpath, filename))
+                local_path = os.path.join(dirpath, filename)
+                node = current_dir.child(filename)
+
+                if node:
+                    logging.error("%d == %d or %s == %s",
+                                  node.node["contentProperties"]["size"],
+                                  os.path.getsize(local_path),
+                                  node.node["contentProperties"]["md5"],
+                                  self.md5sum(local_path))
+
+                if (not node or node.node["contentProperties"]["size"]
+                    != os.path.getsize(local_path) or
+                    node.node["contentProperties"]["md5"] !=
+                    self.md5sum(local_path)):
+                    current_dir.upload_child_file(filename, local_path, node)
 
     def get_root(self):
         nodes = self.request_metadata("%snodes?filters=isRoot:True")
@@ -104,8 +123,8 @@ class DriveSink(object):
         config_filename = self.args.config or os.environ.get(
             "DRIVESINK", None)
         if not config_filename:
-            from os.path import expanduser
-            config_filename = os.path.join(expanduser("~"), ".drivesink")
+            config_filename = os.path.join(
+                os.path.expanduser("~"), ".drivesink")
         return config_filename
 
     def _config(self):
@@ -154,6 +173,13 @@ class DriveSink(object):
             return self._request(url, refresh=False, **kwargs)
         req.raise_for_status()
         return req.json()
+
+    def md5sum(self, filename, blocksize=65536):
+        md5 = hashlib.md5()
+        with open(filename, "r+b") as f:
+            for block in iter(lambda: f.read(blocksize), ""):
+                md5.update(block)
+        return md5.hexdigest()
 
 
 def main():
