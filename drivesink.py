@@ -35,17 +35,21 @@ class CloudNode(object):
             ("metadata", json.dumps({
                 "name": name,
                 "kind": "FILE",
-                "parents": [self.node["id"]]})),
+                "parents": [self.node["id"]],
+            })),
             ("content", (name, open(local_path, 'rb')))])
         if existing_node:
+            """
             # TODO: this is under-documented and currently 500s on Amazon's side
             node = CloudNode(DriveSink.instance().request_content(
                 "%%snodes/%s/content" % existing_node.node["id"],
                 method="put", data=m, headers={'Content-Type': m.content_type}))
-        else:
-            node = CloudNode(DriveSink.instance().request_content(
-                "%snodes", method="post", data=m,
-                headers={'Content-Type': m.content_type}))
+            """
+            old_info = DriveSink.instance().request_metadata(
+                "%%s/trash/%s" % existing_node.node["id"], method="put")
+        node = CloudNode(DriveSink.instance().request_content(
+            "%snodes", method="post", data=m,
+            headers={'Content-Type': m.content_type}))
         self._children[name] = node
 
     def _make_child_folder(self, name):
@@ -89,19 +93,21 @@ class DriveSink(object):
             for filename in filenames:
                 local_path = os.path.join(dirpath, filename)
                 node = current_dir.child(filename)
-
-                if node:
-                    logging.error("%d == %d or %s == %s",
-                                  node.node["contentProperties"]["size"],
-                                  os.path.getsize(local_path),
-                                  node.node["contentProperties"]["md5"],
-                                  self.md5sum(local_path))
-
                 if (not node or node.node["contentProperties"]["size"]
                     != os.path.getsize(local_path) or
                     node.node["contentProperties"]["md5"] !=
-                    self.md5sum(local_path)):
+                    self.md5sum(local_path)) and self.filter_file(filename):
                     current_dir.upload_child_file(filename, local_path, node)
+
+    def filter_file(self, filename):
+        extension = filename.split(".")[-1]
+        allowed = self.args.extensions
+        if not allowed:
+            # Not all tested to be free
+            allowed = (
+                'apng,arw,bmp,cr2,crw,dng,emf,gif,jfif,jpe,jpeg,jpg,mef,nef,' +
+                'orf,pcx,png,psd,raf,ras,srw,swf,tga,tif,tiff,wmf')
+        return extension in allowed.split(",")
 
     def get_root(self):
         nodes = self.request_metadata("%snodes?filters=isRoot:True")
@@ -188,6 +194,8 @@ def main():
     parser.add_argument('command', help='Commands: "sync"')
     parser.add_argument('source', help='The source directory')
     parser.add_argument('destination', help='The destination directory')
+    parser.add_argument('-e', '--extensions',
+                        help='File extensions to upload, images by default')
     parser.add_argument('-c', '--config', help='The config file')
     parser.add_argument('-d', '--drivesink', help='Drivesink URL',
                         # TODO: https://cloudsink.appspot.com
