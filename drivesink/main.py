@@ -7,9 +7,19 @@ import urllib
 import urllib2
 import webapp2
 
+from webapp2_extras import jinja2
+
 import credentials
 
 class SinkHandler(webapp2.RequestHandler):
+    @webapp2.cached_property
+    def _jinja2(self):
+        return jinja2.get_jinja2(app=self.app)
+
+    def _render_template(self, filename, **template_args):
+        self.response.write(self._jinja2.render_template(
+            filename, **template_args))
+
     def _set_cookie(self, key, value, days_expires=None):
         kwargs = {
             "domain": self.request.host,
@@ -30,14 +40,37 @@ class SinkHandler(webapp2.RequestHandler):
         return json.loads(token)
 
     def _token(self):
-        return self._all_tokens()["access_token"]
+        if not hasattr(self, "_access_token"):
+            self._access_token = self._all_tokens()["access_token"]
+        return self._access_token
 
-    def _fetch(self, url, data=None):
-        headers = {"Authorization": "Bearer %s" % self._token()}
-        if data:
-            data = json.dumps(data)
-        req = urllib2.Request(url, data, headers)
-        return urllib2.urlopen(req).read()
+    def _fetch(self, url, data=None, refresh=True):
+        try:
+            headers = {"Authorization": "Bearer %s" % self._token()}
+            logging.info(headers)
+            if data:
+                data = json.dumps(data)
+            req = urllib2.Request(url, data, headers)
+            return urllib2.urlopen(req).read()
+        except urllib2.HTTPError, e:
+            if e.code == 401 and refresh:
+                self._refresh(self._all_tokens()["refresh_token"])
+                return self._fetch(url, data, refresh=False)
+            else:
+                logging.error(e.read())
+                raise
+
+    def _refresh(self, token):
+        data = urllib.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": token,
+            "client_id": credentials.CLIENT_ID,
+            "client_secret": credentials.SECRET,
+        })
+        req = urllib2.Request("https://api.amazon.com/auth/o2/token", data)
+        response = urllib2.urlopen(req).read()
+        self._set_cookie("token", response, 365)
+        self._access_token = json.loads(response)["access_token"]
 
     def _endpoints(self):
         endpoints = self.request.cookies.get("endpoints")
@@ -69,7 +102,7 @@ class NeedAuthException(Exception):
 
 class MainHandler(SinkHandler):
     def get(self):
-        self.response.write('Want to <a href="/auth">auth</a>?')
+        self._render_template('index.html', name=self.request.get('name'))
 
 
 class AuthHandler(SinkHandler):
@@ -102,16 +135,7 @@ class AuthHandler(SinkHandler):
 class RefreshHandler(SinkHandler):
     def post(self):
         refresh_token = self.request.get("refresh_token")
-        data = urllib.urlencode({
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": credentials.CLIENT_ID,
-            "client_secret": credentials.SECRET,
-        })
-        req = urllib2.Request("https://api.amazon.com/auth/o2/token", data)
-        response = urllib2.urlopen(req).read()
-        self._set_cookie("token", response, 365)
-        self.response.write(response)
+        self.response.write(self._refresh(refresh_token))
 
 
 class NodesHandler(SinkHandler):
