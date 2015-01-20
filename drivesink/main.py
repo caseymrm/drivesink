@@ -102,7 +102,7 @@ class NeedAuthException(Exception):
 
 class MainHandler(SinkHandler):
     def get(self):
-        self._render_template('index.html', name=self.request.get('name'))
+        self._render_template("index.html")
 
 
 class AuthHandler(SinkHandler):
@@ -110,8 +110,8 @@ class AuthHandler(SinkHandler):
         code = self.request.get("code")
         if not code:
             # Need spaces to be encoded as %20 so can't use urllib.urlencode
-            url = "https://www.amazon.com/ap/oa?%s" % '&'.join(
-                ['='.join((urllib.quote(k), urllib.quote(v))) for k,v in{
+            url = "https://www.amazon.com/ap/oa?%s" % "&".join(
+                ["=".join((urllib.quote(k), urllib.quote(v))) for k,v in{
                     "client_id": credentials.CLIENT_ID,
                     "scope": "clouddrive:read clouddrive:write",
                     "response_type": "code",
@@ -153,9 +153,9 @@ class ConfigHandler(SinkHandler):
 
 
 app = webapp2.WSGIApplication([
-    ('/', MainHandler),
-    ('/config', ConfigHandler),
-    ('/auth', AuthHandler),
-    ('/refresh', RefreshHandler),
-    ('/nodes', NodesHandler),
+    ("/", MainHandler),
+    ("/config", ConfigHandler),
+    ("/auth", AuthHandler),
+    ("/refresh", RefreshHandler),
+    ("/nodes", NodesHandler),
 ], debug=True)
