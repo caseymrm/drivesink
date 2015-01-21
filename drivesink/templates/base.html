@@ -1,0 +1,13 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    {% block head %}
+    <link rel="stylesheet" href="drivesink.css" />
+    <title>{% block title %}{% endblock %} - DriveSink</title>
+    {% endblock %}
+</head>
+<body>
+    <div class="content">{% block content %}{% endblock %}</div>
+    <div class="footer">{% block footer %}{% endblock %}</div>
+</body>

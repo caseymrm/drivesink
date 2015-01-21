@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Amazon Cloud Drive command-line backup{% endblock %}
+{% block content %}
+    <h1>DriveSink</h1>
+    <h2>What's Amazon Cloud Drive?</h2>
+    <p>
+      Do you have Amazon Prime? Do you have hundreds of gigs of raw
+      photos or photoshop files? Back them up
+      to <a href="https://www.amazon.com/clouddrive">Amazon Cloud
+      Drive</a> for free!
+    </p>
+    <h2>What's the catch?</h2>
+    <p>
+      Sound great? Here's the catch- it's a pain to upload files to
+      Amazon Cloud Drive. On iOS and Android you can sink your photos
+      automatically, and there's a PC app, but for Mac you're dragging
+      and dropping files on to your browser. No fun if you're talking
+      about ten thousand files.
+    </p>
+    <h2>Okay, how can I upload them then?</h2>
+    <p>
+      That's where drivesink comes in- it's a command line tool that
+      will synchronize a directory from your computer to Cloud Drive.
+      Run it whenever you want and it will upload any new or changed
+      files.
+    </p>
+    <h2>What else is this site?</h2>
+    <p>
+      Cloud Drive has a
+      pretty <a href="https://developer.amazon.com/public/apis/experience/cloud-drive">rich
+      API available</a>. However, if you want to use it at all, even
+      for your own use, you have to jump through several hoops and
+      submit an app for approval. Or you can just
+      get <a href="/config">your access token</a> right here.
+    </p>
+    <h2>Get started</h2>
+    <p>
+      <ul>
+        <li>First login and get your <a href="/config">access configuration</a></li>
+        <li>Then download <a href="https://github.com/caseymrm/drivesink/blob/master/drivesink.py">the script</a></li>
+        <li></li>
+      </ul>
+    </p>
+{% endblock %}
