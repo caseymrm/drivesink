@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 
+import base64
 import datetime
+import hashlib
 import json
 import logging
 import urllib
 import urllib2
 import webapp2
 
+from google.appengine.api import memcache
 from webapp2_extras import jinja2
 
 import credentials
@@ -146,10 +149,17 @@ class NodesHandler(SinkHandler):
 
 class ConfigHandler(SinkHandler):
     def get(self):
+        if self.request.get("c"):
+            config = memcache.get("code:%s" % self.request.get("c"))
+            self.response.write(config)
+            return
         token = self._all_tokens()
         token.update(self._endpoints())
-        self.response.write(
-            "<pre>\n%s\n</pre>" % json.dumps(token, sort_keys=True, indent=4))
+        config = json.dumps(token, sort_keys=True, indent=4)
+        code = base64.b64encode(hashlib.sha256(config).digest(), "cm")[:30]
+        memcache.set("code:%s" % code, config, time=900)
+        self._render_template("config.html", config=config,
+                              code="%s?c=%s" % (self.request.url, code))
 
 
 app = webapp2.WSGIApplication([

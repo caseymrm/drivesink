@@ -36,9 +36,15 @@
     <h2>Get started</h2>
     <p>
       <ul>
-        <li>First login and get your <a href="/config">access configuration</a></li>
-        <li>Then download <a href="https://github.com/caseymrm/drivesink/blob/master/drivesink.py">the script</a></li>
-        <li></li>
+        <li>
+          First download <a href="https://github.com/caseymrm/drivesink/blob/master/drivesink.py">the script</a>:
+          <pre>curl -O https://github.com/caseymrm/drivesink/blob/master/drivesink.py</pre>
+        </li>
+        <li>Then get your <a href="/config">access configuration</a> by logging in with Amazon</li>
+        <li>
+          Finally, synchronize your files whenever you feel like it:
+          <pre>./drivesink.py sync ~/Pictures Pictures/backup</pre>
+        </li>
       </ul>
     </p>
 {% endblock %}
