@@ -7,6 +7,7 @@ import json
 import logging
 import urllib
 import urllib2
+import urlparse
 import webapp2
 
 from google.appengine.api import memcache
@@ -50,7 +51,6 @@ class SinkHandler(webapp2.RequestHandler):
     def _fetch(self, url, data=None, refresh=True):
         try:
             headers = {"Authorization": "Bearer %s" % self._token()}
-            logging.info(headers)
             if data:
                 data = json.dumps(data)
             req = urllib2.Request(url, data, headers)
@@ -93,7 +93,7 @@ class SinkHandler(webapp2.RequestHandler):
     def handle_exception(self, exception, debug):
         if isinstance(exception, NeedAuthException):
             # TODO: redirect back to exception.url afterwards
-            self.redirect("/auth")
+            self.redirect("/auth?next=%s" % exception.url)
         else:
             super(SinkHandler, self).handle_exception(exception, debug)
 
@@ -132,7 +132,7 @@ class AuthHandler(SinkHandler):
         req = urllib2.Request("https://api.amazon.com/auth/o2/token", data)
         response = urllib2.urlopen(req).read()
         self._set_cookie("token", response, 365)
-        self.response.write(json.loads(response))
+        self.redirect(self.request.get("next", "/config"))
 
 
 class RefreshHandler(SinkHandler):
@@ -143,8 +143,11 @@ class RefreshHandler(SinkHandler):
 
 class NodesHandler(SinkHandler):
     def get(self):
-        nodes = self._fetch("%s/nodes?filters=kind:FILE" % self._metadata())
-        self.response.write(nodes)
+        logging.error("%s/nodes%s" % (self._metadata(), self.request.query_string))
+        nodes = self._fetch(
+            "%snodes?%s" % (self._metadata(), self.request.query_string))
+        self.response.write("<pre>%s</pre>" % json.dumps(
+            json.loads(nodes), sort_keys=True, indent=4))
 
 
 class ConfigHandler(SinkHandler):
@@ -162,10 +165,18 @@ class ConfigHandler(SinkHandler):
                               code="%s?c=%s" % (self.request.url, code))
 
 
+class UsageHandler(SinkHandler):
+    def get(self):
+        usage = self._fetch("%saccount/usage" % self._metadata())
+        self.response.write("<pre>%s</pre>" % json.dumps(
+            json.loads(usage), sort_keys=True, indent=4))
+
+
 app = webapp2.WSGIApplication([
     ("/", MainHandler),
     ("/config", ConfigHandler),
     ("/auth", AuthHandler),
     ("/refresh", RefreshHandler),
     ("/nodes", NodesHandler),
+    ("/usage", UsageHandler),
 ], debug=True)
