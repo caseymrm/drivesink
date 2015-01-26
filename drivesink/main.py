@@ -143,7 +143,6 @@ class RefreshHandler(SinkHandler):
 
 class NodesHandler(SinkHandler):
     def get(self):
-        logging.error("%s/nodes%s" % (self._metadata(), self.request.query_string))
         nodes = self._fetch(
             "%snodes?%s" % (self._metadata(), self.request.query_string))
         self.response.write("<pre>%s</pre>" % json.dumps(
@@ -154,7 +153,10 @@ class ConfigHandler(SinkHandler):
     def get(self):
         if self.request.get("c"):
             config = memcache.get("code:%s" % self.request.get("c"))
-            self.response.write(config)
+            if config:
+                self.response.write(config)
+            else:
+                self.abort(404)
             return
         token = self._all_tokens()
         token.update(self._endpoints())
