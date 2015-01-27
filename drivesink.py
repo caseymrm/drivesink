@@ -30,7 +30,7 @@ class CloudNode(object):
         return node
 
     def upload_child_file(self, name, local_path, existing_node=None):
-        logging.info("Uploading %s in %r", local_path, self.node["name"])
+        logging.info("Uploading %s to %s", local_path, self.node["name"])
         m = requests_toolbelt.MultipartEncoder([
             ("metadata", json.dumps({
                 "name": name,
@@ -51,6 +51,32 @@ class CloudNode(object):
             "%snodes", method="post", data=m,
             headers={'Content-Type': m.content_type}))
         self._children[name] = node
+
+    def download_file(self, local_path):
+        logging.info("Downloading %s into %s", self.node["name"], local_path)
+        req = DriveSink.instance().request_content(
+            "%%snodes/%s/content" % self.node["id"], method="get", stream=True,
+            decode=False)
+        if req.status_code != 200:
+            logging.error("Unable to download file: %r", req.text)
+            exit(1)
+        with open(local_path, "wb") as f:
+            for chunk in req.iter_content():
+                f.write(chunk)
+
+    def differs(self, local_path):
+        return (not os.path.exists(local_path) or
+                self.node["contentProperties"]["size"] !=
+                os.path.getsize(local_path) or
+                self.node["contentProperties"]["md5"] !=
+                self._md5sum(local_path))
+
+    def _md5sum(self, filename, blocksize=65536):
+        md5 = hashlib.md5()
+        with open(filename, "r+b") as f:
+            for block in iter(lambda: f.read(blocksize), ""):
+                md5.update(block)
+        return md5.hexdigest()
 
     def _make_child_folder(self, name):
         logging.info(
@@ -78,7 +104,7 @@ class DriveSink(object):
             cls._instance = cls(args)
         return cls._instance
 
-    def sync(self, source, destination):
+    def upload(self, source, destination):
         remote_node = self.node_at_path(
             self.get_root(), destination, create_missing=True)
         for dirpath, dirnames, filenames in os.walk(source):
@@ -93,11 +119,23 @@ class DriveSink(object):
             for filename in filenames:
                 local_path = os.path.join(dirpath, filename)
                 node = current_dir.child(filename)
-                if (not node or node.node["contentProperties"]["size"]
-                    != os.path.getsize(local_path) or
-                    node.node["contentProperties"]["md5"] !=
-                    self.md5sum(local_path)) and self.filter_file(filename):
+                if (not node or node.differs(
+                        local_path)) and self.filter_file(filename):
                     current_dir.upload_child_file(filename, local_path, node)
+
+    def download(self, source, destination):
+        to_download = [(self.node_at_path(self.get_root(), source),
+                        self.join_path(destination, create_missing=True))]
+        while len(to_download):
+            node, path = to_download.pop(0)
+            for name, child in node.children().iteritems():
+                if child.node["kind"] == "FOLDER":
+                    to_download.append((child, self.join_path(
+                        child.node["name"], path, create_missing=True)))
+                elif child.node["kind"] == "FILE":
+                    local_path = os.path.join(path, child.node["name"])
+                    if child.differs(local_path):
+                        child.download_file(local_path)
 
     def filter_file(self, filename):
         extension = filename.split(".")[-1]
@@ -124,6 +162,18 @@ class DriveSink(object):
             if not node:
                 return None
         return node
+
+    def join_path(self, destination, root="/", create_missing=True):
+        directory = os.path.join(root, destination)
+        if not os.path.exists(directory):
+            if create_missing:
+                os.makedirs(directory)
+            else:
+                return None
+        if not os.path.isdir(directory):
+            logging.error("%s is not a directory", directory)
+            exit(1)
+        return directory
 
     def _config_file(self):
         config_filename = self.args.config or os.environ.get(
@@ -160,7 +210,7 @@ class DriveSink(object):
         return self._request(
             path % self._config()["contentUrl"], **kwargs)
 
-    def _request(self, url, refresh=True, **kwargs):
+    def _request(self, url, refresh=True, decode=True, **kwargs):
         headers = {
             "Authorization": "Bearer %s" % self._config()["access_token"],
         }
@@ -172,26 +222,26 @@ class DriveSink(object):
                 "refresh_token": self._config()["refresh_token"],
             })
             req.raise_for_status()
-            new_config = req.json()
+            try:
+                new_config = req.json()
+            except:
+                logging.error("Could not refresh: %r", req.text)
+                raise
             self.config.update(new_config)
-            with open(self._config_file(), 'w') as f:
+            with open(self._config_file(), "w") as f:
                 f.write(json.dumps(self.config, sort_keys=True, indent=4))
-            return self._request(url, refresh=False, **kwargs)
+            return self._request(url, refresh=False, decode=decode, **kwargs)
         req.raise_for_status()
-        return req.json()
-
-    def md5sum(self, filename, blocksize=65536):
-        md5 = hashlib.md5()
-        with open(filename, "r+b") as f:
-            for block in iter(lambda: f.read(blocksize), ""):
-                md5.update(block)
-        return md5.hexdigest()
+        if decode:
+            return req.json()
+        return req
 
 
 def main():
     parser = argparse.ArgumentParser(
         description='Amazon Cloud Drive synchronization tool')
-    parser.add_argument('command', help='Commands: "sync"')
+    parser.add_argument('command', choices=["upload", "download"],
+                        help='Commands: "upload", "download"')
     parser.add_argument('source', help='The source directory')
     parser.add_argument('destination', help='The destination directory')
     parser.add_argument('-e', '--extensions',
@@ -203,13 +253,12 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command != "sync":
-        parser.print_help()
-        exit(1)
-
     drivesink = DriveSink.instance(args)
 
-    drivesink.sync(args.source, args.destination)
+    if args.command == "upload":
+        drivesink.upload(args.source, args.destination)
+    elif args.command == "download":
+        drivesink.download(args.source, args.destination)
 
 logging.basicConfig(
     format = "%(levelname) -10s %(module)s:%(lineno)s %(funcName)s %(message)s",

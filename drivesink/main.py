@@ -74,6 +74,7 @@ class SinkHandler(webapp2.RequestHandler):
         response = urllib2.urlopen(req).read()
         self._set_cookie("token", response, 365)
         self._access_token = json.loads(response)["access_token"]
+        return response
 
     def _endpoints(self):
         endpoints = self.request.cookies.get("endpoints")
