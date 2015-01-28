@@ -37,19 +37,19 @@ class CloudNode(object):
                 "kind": "FILE",
                 "parents": [self.node["id"]],
             })),
-            ("content", (name, open(local_path, 'rb')))])
+            ("content", (name, open(local_path, "rb")))])
         if existing_node:
             """
             # TODO: this is under-documented and currently 500s on Amazon's side
             node = CloudNode(DriveSink.instance().request_content(
                 "%%snodes/%s/content" % existing_node.node["id"],
-                method="put", data=m, headers={'Content-Type': m.content_type}))
+                method="put", data=m, headers={"Content-Type": m.content_type}))
             """
             old_info = DriveSink.instance().request_metadata(
                 "%%s/trash/%s" % existing_node.node["id"], method="put")
         node = CloudNode(DriveSink.instance().request_content(
             "%snodes", method="post", data=m,
-            headers={'Content-Type': m.content_type}))
+            headers={"Content-Type": m.content_type}))
         self._children[name] = node
 
     def download_file(self, local_path):
@@ -143,8 +143,8 @@ class DriveSink(object):
         if not allowed:
             # Not all tested to be free
             allowed = (
-                'apng,arw,bmp,cr2,crw,dng,emf,gif,jfif,jpe,jpeg,jpg,mef,nef,' +
-                'orf,pcx,png,psd,raf,ras,srw,swf,tga,tif,tiff,wmf')
+                "apng,arw,bmp,cr2,crw,dng,emf,gif,jfif,jpe,jpeg,jpg,mef,nef," +
+                "orf,pcx,png,psd,raf,ras,srw,swf,tga,tif,tiff,wmf")
         return extension in allowed.split(",")
 
     def get_root(self):
@@ -239,18 +239,16 @@ class DriveSink(object):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Amazon Cloud Drive synchronization tool')
-    parser.add_argument('command', choices=["upload", "download"],
-                        help='Commands: "upload", "download"')
-    parser.add_argument('source', help='The source directory')
-    parser.add_argument('destination', help='The destination directory')
-    parser.add_argument('-e', '--extensions',
-                        help='File extensions to upload, images by default')
-    parser.add_argument('-c', '--config', help='The config file')
-    parser.add_argument('-d', '--drivesink', help='Drivesink URL',
-                        # TODO: https://cloudsink.appspot.com
-                        default='http://localhost:14080')
-
+        description="Amazon Cloud Drive synchronization tool")
+    parser.add_argument("command", choices=["upload", "download"],
+                        help="Commands: 'upload' or 'download'")
+    parser.add_argument("source", help="The source directory")
+    parser.add_argument("destination", help="The destination directory")
+    parser.add_argument("-e", "--extensions",
+                        help="File extensions to upload, images by default")
+    parser.add_argument("-c", "--config", help="The config file")
+    parser.add_argument("-d", "--drivesink", help="Drivesink URL",
+                        default="https://cloudsink.appspot.com")
     args = parser.parse_args()
 
     drivesink = DriveSink.instance(args)
