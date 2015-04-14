@@ -148,7 +148,7 @@ class DriveSink(object):
         return extension in allowed.split(",")
 
     def get_root(self):
-        nodes = self.request_metadata("%snodes?filters=isRoot:True")
+        nodes = self.request_metadata("%snodes?filters=isRoot:true")
         if nodes["count"] != 1:
             logging.error("Could not find root")
             exit(1)
@@ -248,7 +248,7 @@ def main():
                         help="File extensions to upload, images by default")
     parser.add_argument("-c", "--config", help="The config file")
     parser.add_argument("-d", "--drivesink", help="Drivesink URL",
-                        default="https://cloudsink.appspot.com")
+                        default="https://drivesink.appspot.com")
     args = parser.parse_args()
 
     drivesink = DriveSink.instance(args)
