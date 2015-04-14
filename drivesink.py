@@ -138,12 +138,14 @@ class DriveSink(object):
                         child.download_file(local_path)
 
     def filter_file(self, filename):
-        extension = filename.split(".")[-1]
+        _, extension = os.path.splitext(filename)
+        extension = extension.lstrip(".").lower()
+
         allowed = self.args.extensions
         if not allowed:
             # Not all tested to be free
             allowed = (
-                "apng,arw,bmp,cr2,crw,dng,emf,gif,jfif,jpe,jpeg,jpg,mef,nef," +
+                "apng,arw,bmp,cr2,crw,dng,emf,gif,jfif,jpe,jpeg,jpg,mef,nef,"
                 "orf,pcx,png,psd,raf,ras,srw,swf,tga,tif,tiff,wmf")
         return extension in allowed.split(",")
 
