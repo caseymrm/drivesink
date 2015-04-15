@@ -7,6 +7,7 @@ import logging
 import os
 import requests
 import requests_toolbelt
+import sys
 import uuid
 
 
@@ -59,7 +60,7 @@ class CloudNode(object):
             decode=False)
         if req.status_code != 200:
             logging.error("Unable to download file: %r", req.text)
-            exit(1)
+            sys.exit(1)
         with open(local_path, "wb") as f:
             for chunk in req.iter_content():
                 f.write(chunk)
@@ -94,7 +95,7 @@ class DriveSink(object):
     def __init__(self, args):
         if not args:
             logging.error("Never initialized")
-            exit(1)
+            sys.exit(1)
         self.args = args
         self.config = None
 
@@ -113,7 +114,7 @@ class DriveSink(object):
                 remote_node, relative, create_missing=True)
             if not current_dir:
                 logging.error("Could not create missing node")
-                exit(1)
+                sys.exit(1)
             for dirname in dirnames:
                 current_dir.child(dirname, create=True)
             for filename in filenames:
@@ -153,7 +154,7 @@ class DriveSink(object):
         nodes = self.request_metadata("%snodes?filters=isRoot:true")
         if nodes["count"] != 1:
             logging.error("Could not find root")
-            exit(1)
+            sys.exit(1)
         return CloudNode(nodes["data"][0])
 
     def node_at_path(self, root, path, create_missing=False):
@@ -174,7 +175,7 @@ class DriveSink(object):
                 return None
         if not os.path.isdir(directory):
             logging.error("%s is not a directory", directory)
-            exit(1)
+            sys.exit(1)
         return directory
 
     def _config_file(self):
@@ -192,7 +193,7 @@ class DriveSink(object):
                 self.config = json.loads(open(config_filename, "r").read())
             except:
                 print "%s/config to get your tokens" % self.args.drivesink
-                exit(1)
+                sys.exit(1)
         return self.config
 
     def request_metadata(self, path, json_data=None, **kwargs):
@@ -217,12 +218,20 @@ class DriveSink(object):
             "Authorization": "Bearer %s" % self._config()["access_token"],
         }
         headers.update(kwargs.pop("headers", {}))
-        req = requests.request(url=url, headers=headers, **kwargs)
+        req = requests.request(url=url, headers=headers, verify=False, **kwargs)
         if req.status_code == 401 and refresh:
             # Have to proxy to get the client id and secret
             req = requests.post("%s/refresh" % self.args.drivesink, data={
                 "refresh_token": self._config()["refresh_token"],
             })
+            if req.status_code != 200:
+                try:
+                    response = req.json()
+                    logging.error("Got Amazon code %s: %s",
+                                  response["code"], response["message"])
+                    sys.exit(1)
+                except Exception:
+                    pass
             req.raise_for_status()
             try:
                 new_config = req.json()
@@ -233,6 +242,14 @@ class DriveSink(object):
             with open(self._config_file(), "w") as f:
                 f.write(json.dumps(self.config, sort_keys=True, indent=4))
             return self._request(url, refresh=False, decode=decode, **kwargs)
+        if req.status_code != 200:
+            try:
+                response = req.json()
+                logging.error("Got Amazon code %s: %s",
+                              response["code"], response["message"])
+                sys.exit(1)
+            except Exception:
+                pass
         req.raise_for_status()
         if decode:
             return req.json()
