@@ -218,7 +218,7 @@ class DriveSink(object):
             "Authorization": "Bearer %s" % self._config()["access_token"],
         }
         headers.update(kwargs.pop("headers", {}))
-        req = requests.request(url=url, headers=headers, verify=False, **kwargs)
+        req = requests.request(url=url, headers=headers, **kwargs)
         if req.status_code == 401 and refresh:
             # Have to proxy to get the client id and secret
             req = requests.post("%s/refresh" % self.args.drivesink, data={
