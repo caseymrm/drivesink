@@ -74,7 +74,7 @@ class CloudNode(object):
 
     def _md5sum(self, filename, blocksize=65536):
         md5 = hashlib.md5()
-        with open(filename, "r+b") as f:
+        with open(filename, "rb") as f:
             for block in iter(lambda: f.read(blocksize), ""):
                 md5.update(block)
         return md5.hexdigest()
