@@ -9,6 +9,7 @@ import requests
 import requests_toolbelt
 import sys
 import uuid
+import mimetypes
 
 
 class CloudNode(object):
@@ -32,13 +33,14 @@ class CloudNode(object):
 
     def upload_child_file(self, name, local_path, existing_node=None):
         logging.info("Uploading %s to %s", local_path, self.node["name"])
+        mime_type = _get_mimetype(name)
         m = requests_toolbelt.MultipartEncoder([
             ("metadata", json.dumps({
                 "name": name,
                 "kind": "FILE",
                 "parents": [self.node["id"]],
             })),
-            ("content", (name, open(local_path, "rb")))])
+            ("content", (name, open(local_path, "rb"), mime_type))])
         if existing_node:
             """
             # TODO: this is under-documented and currently 500s on Amazon's side
@@ -255,6 +257,9 @@ class DriveSink(object):
             return req.json()
         return req
 
+def _get_mimetype(file_name = ''):
+    mt = mimetypes.guess_type(file_name)[0]
+    return mt if mt else 'application/octet-stream'
 
 def main():
     parser = argparse.ArgumentParser(
