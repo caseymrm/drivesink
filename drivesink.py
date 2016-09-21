@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# coding: utf-8
 
 import argparse
 import hashlib
@@ -82,8 +83,12 @@ class CloudNode(object):
         return md5.hexdigest()
 
     def _make_child_folder(self, name):
-        logging.info(
-            "Creating remote folder %s in %s", name, self.node["name"])
+        if "isRoot" in self.node.keys() and self.node["isRoot"] == True:
+            logging.info(
+                "Creating remote folder %s in root", name)
+        else:
+            logging.info(
+                "Creating remote folder %s in %s", name, self.node["name"])
         node = CloudNode(
             DriveSink.instance().request_metadata("%snodes", {
                 "kind": "FOLDER",
@@ -266,8 +271,8 @@ def main():
         description="Amazon Cloud Drive synchronization tool")
     parser.add_argument("command", choices=["upload", "download"],
                         help="Commands: 'upload' or 'download'")
-    parser.add_argument("source", help="The source directory")
-    parser.add_argument("destination", help="The destination directory")
+    parser.add_argument("source", type=lambda s: unicode(s, 'utf8'), help="The source directory")
+    parser.add_argument("destination", type=lambda s: unicode(s, 'utf8'), help="The destination directory")
     parser.add_argument("-e", "--extensions",
                         help="File extensions to upload, images by default")
     parser.add_argument("-c", "--config", help="The config file")
