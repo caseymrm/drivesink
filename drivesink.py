@@ -11,6 +11,7 @@ import requests_toolbelt
 import sys
 import uuid
 import mimetypes
+import time
 
 
 class CloudNode(object):
@@ -20,9 +21,14 @@ class CloudNode(object):
 
     def children(self):
         if not self._children_fetched:
-            nodes = DriveSink.instance().request_metadata(
-                "%%snodes/%s/children" % self.node["id"])
+            nodes = DriveSink.instance().request_metadata("%%snodes/%s/children" % self.node["id"])
             self._children = {n["name"]: CloudNode(n) for n in nodes["data"]}
+            while nodes["count"] > len(self._children):
+                nodes = DriveSink.instance().request_metadata("%snodes/" + self.node["id"] + "/children?startToken=" + nodes["nextToken"])
+                if len(nodes["data"]) == 0:
+                    break
+                for n in nodes["data"]:
+                    self._children[n["name"]] = CloudNode(n)
             self._children_fetched = True
         return self._children
 
@@ -113,6 +119,7 @@ class DriveSink(object):
         return cls._instance
 
     def upload(self, source, destination):
+	logging.info("Uploading '" + source + "' to '" + destination + "' ...")
         remote_node = self.node_at_path(
             self.get_root(), destination, create_missing=True)
         for dirpath, dirnames, filenames in os.walk(source):
@@ -123,13 +130,22 @@ class DriveSink(object):
                 logging.error("Could not create missing node")
                 sys.exit(1)
             for dirname in dirnames:
+		logging.info("Processing directory '" + dirname + "' ...")
                 current_dir.child(dirname, create=True)
             for filename in filenames:
                 local_path = os.path.join(dirpath, filename)
                 node = current_dir.child(filename)
                 if (not node or node.differs(
                         local_path)) and self.filter_file(filename):
-                    current_dir.upload_child_file(filename, local_path, node)
+                    n_backoff = 0
+		    while n_backoff<512:
+                        try:
+                            current_dir.upload_child_file(filename, local_path, node)
+                            break
+                        except Exception, e:
+                            logging.error("Error uploading file. We will retry. Error: " + str(e))
+                            time.sleep(2 ** n_backoff)
+                            n_backoff += 1
 
     def download(self, source, destination):
         to_download = [(self.node_at_path(self.get_root(), source),
