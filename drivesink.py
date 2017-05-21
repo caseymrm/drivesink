@@ -65,7 +65,7 @@ class CloudNode(object):
             logging.error("Unable to download file: %r", req.text)
             sys.exit(1)
         with open(local_path, "wb") as f:
-            for chunk in req.iter_content():
+            for chunk in req.iter_content(chunk_size=1024):
                 f.write(chunk)
 
     def differs(self, local_path):
