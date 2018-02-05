@@ -57,10 +57,12 @@ class CloudNode(object):
             """
             old_info = DriveSink.instance().request_metadata(
                 "%%s/trash/%s" % existing_node.node["id"], method="put")
-        node = CloudNode(DriveSink.instance().request_content(
-            "%snodes", method="post", data=m,
-            headers={"Content-Type": m.content_type}))
-        self._children[name] = node
+        ds = DriveSink.instance()
+        resp = ds.request_content("%snodes", method="post", data=m,
+            headers={"Content-Type": m.content_type})
+        if resp != None:
+            node = CloudNode(resp)
+            self._children[name] = node
 
     def download_file(self, local_path):
         logging.info("Downloading %s into %s", self.node["name"], local_path)
@@ -119,7 +121,7 @@ class DriveSink(object):
         return cls._instance
 
     def upload(self, source, destination):
-	logging.info("Uploading '" + source + "' to '" + destination + "' ...")
+        logging.info("Uploading '" + source + "' to '" + destination + "' ...")
         remote_node = self.node_at_path(
             self.get_root(), destination, create_missing=True)
         for dirpath, dirnames, filenames in os.walk(source):
@@ -130,19 +132,21 @@ class DriveSink(object):
                 logging.error("Could not create missing node")
                 sys.exit(1)
             for dirname in dirnames:
-		logging.info("Processing directory '" + dirname + "' ...")
+                logging.info("Processing directory '" + dirname + "' ...")
                 current_dir.child(dirname, create=True)
             for filename in filenames:
+                if not filename.lower().endswith(('.jpg','.jpeg','.png')):
+                    continue
                 local_path = os.path.join(dirpath, filename)
                 node = current_dir.child(filename)
                 if (not node or node.differs(
                         local_path)) and self.filter_file(filename):
                     n_backoff = 0
-		    while n_backoff<512:
+                    while n_backoff<1:
                         try:
                             current_dir.upload_child_file(filename, local_path, node)
                             break
-                        except Exception, e:
+                        except Exception as e:
                             logging.error("Error uploading file. We will retry. Error: " + str(e))
                             time.sleep(2 ** n_backoff)
                             n_backoff += 1
@@ -183,8 +187,8 @@ class DriveSink(object):
     def node_at_path(self, root, path, create_missing=False):
         parts = filter(None, path.split("/"))
         node = root
-        while len(parts):
-            node = node.child(parts.pop(0), create=create_missing)
+        for p in parts:
+            node = node.child(p, create=create_missing)
             if not node:
                 return None
         return node
@@ -215,7 +219,7 @@ class DriveSink(object):
             try:
                 self.config = json.loads(open(config_filename, "r").read())
             except:
-                print "%s/config to get your tokens" % self.args.drivesink
+                print ("%s/config to get your tokens" % self.args.drivesink)
                 sys.exit(1)
         return self.config
 
@@ -265,14 +269,22 @@ class DriveSink(object):
             with open(self._config_file(), "w") as f:
                 f.write(json.dumps(self.config, sort_keys=True, indent=4))
             return self._request(url, refresh=False, decode=decode, **kwargs)
+        skip = False
         if req.status_code != 200:
             try:
                 response = req.json()
-                logging.error("Got Amazon code %s: %s",
+                if req.status_code == 409 and response["code"] == 'MD5_DUPLICATE':
+                    logging.warning("Skipping duplicate, got Amazon code %s: %s",
+                        response["code"], response["message"])
+                    skip = True
+                else:        
+                    logging.error("Got Amazon code %s: %s",
                               response["code"], response["message"])
-                sys.exit(1)
+                    sys.exit(1)
             except Exception:
                 pass
+        if skip == True:
+            return None
         req.raise_for_status()
         if decode:
             return req.json()
@@ -287,8 +299,8 @@ def main():
         description="Amazon Cloud Drive synchronization tool")
     parser.add_argument("command", choices=["upload", "download"],
                         help="Commands: 'upload' or 'download'")
-    parser.add_argument("source", type=lambda s: unicode(s, 'utf8'), help="The source directory")
-    parser.add_argument("destination", type=lambda s: unicode(s, 'utf8'), help="The destination directory")
+    parser.add_argument("source", help="The source directory")
+    parser.add_argument("destination", help="The destination directory")
     parser.add_argument("-e", "--extensions",
                         help="File extensions to upload, images by default")
     parser.add_argument("-c", "--config", help="The config file")
